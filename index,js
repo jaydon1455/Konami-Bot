@@ -1,0 +1,63 @@
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys")
+const qrcode = require("qrcode-terminal")
+const fs = require("fs")
+
+async function startBot() {
+    const { state, saveCreds } = await useMultiFileAuthState("sessions")
+
+    const sock = makeWASocket({
+        auth: state
+    })
+
+    sock.ev.on("creds.update", saveCreds)
+
+    sock.ev.on("connection.update", (update) => {
+        const { connection, qr } = update
+
+        if (qr) {
+            qrcode.generate(qr, { small: true })
+        }
+
+        if (connection === "close") {
+            startBot()
+        } else if (connection === "open") {
+            console.log("✅ Bot Connected Successfully!")
+        }
+    })
+
+    sock.ev.on("messages.upsert", async ({ messages }) => {
+        const msg = messages[0]
+        if (!msg.message || msg.key.fromMe) return
+
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text
+        const from = msg.key.remoteJid
+
+        if (!text) return
+
+        if (text === "!menu") {
+            await sock.sendMessage(from, {
+                text: "🔥 *Konami Account Shop*\n\n1️⃣ !price - View Prices\n2️⃣ !stock - Check Stock\n3️⃣ !buy - Purchase Account"
+            })
+        }
+
+        if (text === "!price") {
+            await sock.sendMessage(from, {
+                text: "💰 *Prices:*\n\n🎮 Bronze Account - 500 KES\n🎮 Silver Account - 1000 KES\n🎮 Gold Account - 2000 KES"
+            })
+        }
+
+        if (text === "!stock") {
+            await sock.sendMessage(from, {
+                text: "📦 Current Stock:\n\nBronze: 5\nSilver: 3\nGold: 2"
+            })
+        }
+
+        if (text === "!buy") {
+            await sock.sendMessage(from, {
+                text: "🛒 To purchase, send the account type you want.\nExample: Bronze"
+            })
+        }
+    })
+}
+
+startBot()
