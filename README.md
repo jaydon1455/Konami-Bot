@@ -25,4 +25,4 @@ A powerful WhatsApp automation bot built with **Node.js** and **Baileys** for se
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/konami-whatsapp-bot.git
+git clone https://github.com/jaydon1455/konami-whatsapp-bot.git
