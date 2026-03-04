@@ -1,60 +1,116 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require("@whiskeysockets/baileys")
+const { default: makeWASocket, useMultiFileAuthState } = require("@whiskeysockets/baileys")
 const qrcode = require("qrcode-terminal")
 const fs = require("fs")
+const config = require("./config")
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState("sessions")
 
-    const sock = makeWASocket({
-        auth: state
-    })
-
+    const sock = makeWASocket({ auth: state })
     sock.ev.on("creds.update", saveCreds)
 
-    sock.ev.on("connection.update", (update) => {
-        const { connection, qr } = update
-
-        if (qr) {
-            qrcode.generate(qr, { small: true })
-        }
-
-        if (connection === "close") {
-            startBot()
-        } else if (connection === "open") {
-            console.log("✅ Bot Connected Successfully!")
-        }
+    sock.ev.on("connection.update", ({ connection, qr }) => {
+        if (qr) qrcode.generate(qr, { small: true })
+        if (connection === "open") console.log("✅ Bot Connected")
+        if (connection === "close") startBot()
     })
 
     sock.ev.on("messages.upsert", async ({ messages }) => {
         const msg = messages[0]
         if (!msg.message || msg.key.fromMe) return
 
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text
         const from = msg.key.remoteJid
-
+        const sender = msg.key.participant || from
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text
         if (!text) return
 
+        const stock = JSON.parse(fs.readFileSync("./database/stock.json"))
+
+        // 🔐 ADMIN COMMAND CHECK
+        const isAdmin = sender === config.adminNumber
+
+        // 📌 MENU
         if (text === "!menu") {
             await sock.sendMessage(from, {
-                text: "🔥 *Konami Account Shop*\n\n1️⃣ !price - View Prices\n2️⃣ !stock - Check Stock\n3️⃣ !buy - Purchase Account"
+                text: "🔥 *Konami Shop*\n\n!price\n!stock\n!buy Bronze/Silver/Gold\n!help"
             })
         }
 
+        // 💰 PRICE
         if (text === "!price") {
             await sock.sendMessage(from, {
-                text: "💰 *Prices:*\n\n🎮 Bronze Account - 500 KES\n🎮 Silver Account - 1000 KES\n🎮 Gold Account - 2000 KES"
+                text: "💰 *Prices*\nBronze - 500 KES\nSilver - 1000 KES\nGold - 2000 KES"
             })
         }
 
+        // 📦 STOCK CHECK
         if (text === "!stock") {
             await sock.sendMessage(from, {
-                text: "📦 Current Stock:\n\nBronze: 5\nSilver: 3\nGold: 2"
+                text: `📦 *Current Stock*\nBronze: ${stock.Bronze}\nSilver: ${stock.Silver}\nGold: ${stock.Gold}`
             })
         }
 
-        if (text === "!buy") {
+        // 🛒 BUY SYSTEM
+        if (text.startsWith("!buy")) {
+            const type = text.split(" ")[1]
+            if (!stock[type] || stock[type] <= 0) {
+                return sock.sendMessage(from, { text: "❌ Out of stock!" })
+            }
+
             await sock.sendMessage(from, {
-                text: "🛒 To purchase, send the account type you want.\nExample: Bronze"
+                text: `💳 Pay to M-Pesa\nNumber: ${config.mpesaNumber}\nName: ${config.mpesaName}\n\nAfter payment send: !paid ${type}`
+            })
+        }
+
+        // ✅ PAYMENT CONFIRMATION (Manual system)
+        if (text.startsWith("!paid")) {
+            const type = text.split(" ")[1]
+            if (!stock[type] || stock[type] <= 0) {
+                return sock.sendMessage(from, { text: "❌ Out of stock!" })
+            }
+
+            stock[type] -= 1
+            fs.writeFileSync("./database/stock.json", JSON.stringify(stock, null, 2))
+
+            let sales = JSON.parse(fs.readFileSync("./database/sales.json"))
+            sales.push({ buyer: sender, product: type, date: new Date() })
+            fs.writeFileSync("./database/sales.json", JSON.stringify(sales, null, 2))
+
+            await sock.sendMessage(from, {
+                text: `✅ Payment Received!\n🎮 Your ${type} account details will be sent shortly.\n\nThank you for buying!`
+            })
+        }
+
+        // ➕ ADMIN ADD STOCK
+        if (text.startsWith("!addstock") && isAdmin) {
+            const parts = text.split(" ")
+            const type = parts[1]
+            const amount = parseInt(parts[2])
+
+            stock[type] += amount
+            fs.writeFileSync("./database/stock.json", JSON.stringify(stock, null, 2))
+
+            await sock.sendMessage(from, { text: `✅ Added ${amount} ${type} accounts.` })
+        }
+
+        // 📊 ADMIN SALES REPORT
+        if (text === "!sales" && isAdmin) {
+            let sales = JSON.parse(fs.readFileSync("./database/sales.json"))
+            await sock.sendMessage(from, {
+                text: `📊 Total Sales: ${sales.length}`
+            })
+        }
+
+        // 🤖 SMART AUTO REPLY
+        if (text.toLowerCase().includes("hi") || text.toLowerCase().includes("hello")) {
+            await sock.sendMessage(from, {
+                text: "👋 Welcome to Konami Account Shop!\nType !menu to see options."
+            })
+        }
+
+        if (text.toLowerCase().includes("price")) {
+            await sock.sendMessage(from, {
+                text: "Type !price to see account prices."
             })
         }
     })
